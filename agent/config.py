@@ -27,4 +27,5 @@ CODER_MODEL = "llama-3.3-70b-versatile"  # Fallback to versatile if Qwen isn't a
 # API Keys
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL")

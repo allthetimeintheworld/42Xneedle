@@ -2,7 +2,7 @@ import os
 import json
 import time
 from openai import OpenAI, RateLimitError
-from .config import GROQ_API_KEY, MISTRAL_API_KEY, PLANNER_MODEL, LOG_DIR
+from .config import GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY, PLANNER_MODEL, LOG_DIR
 from datetime import datetime
 
 def log_event(filename, message):
@@ -25,6 +25,14 @@ if MISTRAL_API_KEY:
     mistral_client = OpenAI(
         api_key=MISTRAL_API_KEY,
         base_url="https://api.mistral.ai/v1",
+        max_retries=3
+    )
+
+deepseek_client = None
+if DEEPSEEK_API_KEY:
+    deepseek_client = OpenAI(
+        api_key=DEEPSEEK_API_KEY,
+        base_url="https://api.deepseek.com",
         max_retries=3
     )
 
@@ -59,19 +67,24 @@ def ask_model(prompt, system_instruction, model=PLANNER_MODEL):
         {"role": "user", "content": prompt}
     ]
 
-    # 1. Try Groq
+    # 1. Try DeepSeek (High Priority for reliability if Groq is limited)
+    if deepseek_client:
+        content = _call_client(deepseek_client, "deepseek-chat", messages)
+        if content: return content
+
+    # 2. Try Groq
     if groq_client:
         content = _call_client(groq_client, model, messages)
         if content: return content
 
-    # 2. Try Mistral Fallback
+    # 3. Try Mistral Fallback
     if mistral_client:
-        log_event("decisions.log", "Groq failed or rate-limited. Falling back to Mistral.")
+        log_event("decisions.log", "DeepSeek/Groq failed. Falling back to Mistral.")
         # Use mistral-large-latest as it's their strong model
         content = _call_client(mistral_client, "mistral-large-latest", messages)
         if content: return content
 
-    # 3. Manual Fallback
+    # 4. Manual Fallback
     print("\n--- ALL API PROVIDERS FAILED OR RATE-LIMITED ---")
     print(f"System: {system_instruction}")
     print(f"User: {prompt}")
