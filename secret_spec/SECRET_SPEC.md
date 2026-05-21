@@ -1,4 +1,4 @@
-# Task: 
+# Task: Short book s
 
 ## Goal
 return a .txt file to 'src/' containing a 200 word summary of the book To Kill a Mockingbird
