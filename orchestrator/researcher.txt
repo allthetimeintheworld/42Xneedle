@@ -14,10 +14,19 @@ YOUR TASK:
 RESPONSE FORMAT:
 You MUST return a JSON object with:
 1. "thought": Analyze why the previous attempt failed and what the logs tell you.
-2. "action": The immediate recovery tool.
-3. "params": Parameters for the action.
+2. "action": The immediate recovery tool. Supported: edit_file, run_command, read_file, list_files, stop.
+3. "params": Parameters for the action (see SCHEMA below).
 4. "hypothesis": A NEW theory on how to fix the issue.
 5. "task_status": "Recovering from [Failure Type]".
+
+STRICT PARAMETER SCHEMA:
+- edit_file: {"path": "string", "content": "string"}
+- read_file: {"path": "string"}
+- list_files: {"dir": "string"}
+- run_command: {"command": "string"}
+- stop: {"reason": "string"}
+
+IMPORTANT: You MUST use the exact keys "path", "content", "dir", "command", and "reason". Use absolute paths when possible.
 
 STALL WARNING:
 If you see a STALL WARNING in the prompt, change your strategy completely.

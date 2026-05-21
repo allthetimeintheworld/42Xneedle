@@ -1,48 +1,59 @@
 import os
 from ..llm import log_event
 
+def _enforce_sandbox(path):
+    """Ensures the path is relative to the project root and doesn't escape it."""
+    if not path:
+        return None
+    try:
+        project_root = os.getcwd()
+        abs_path = os.path.abspath(path)
+        if not abs_path.startswith(project_root):
+            log_event("errors.log", f"SECURITY VIOLATION: Attempted to access out-of-sandbox path: {abs_path}")
+            return None
+        return abs_path
+    except Exception as e:
+        log_event("errors.log", f"Path resolution error for {path}: {str(e)}")
+        return None
+
 def read_file(path):
-    if os.path.exists(path):
-        with open(path, "r") as f:
+    safe_path = _enforce_sandbox(path)
+    if safe_path and os.path.exists(safe_path):
+        with open(safe_path, "r") as f:
             content = f.read()
         log_event("commands.log", f"Read file: {path}")
         return content
-    log_event("errors.log", f"read_file failed: path not found: {path}")
+    log_event("errors.log", f"read_file failed: path invalid or not found: {path}")
     return None
 
 def edit_file(path, content):
-    if not path:
-        log_event("errors.log", "edit_file failed: no path provided")
+    safe_path = _enforce_sandbox(path)
+    if not safe_path:
         return False
     
-    # Safety: ensure path is relative and within project
-    if os.path.isabs(path) or ".." in path:
-        # For the hackathon, we allow it if it's within the project root
-        # but let's encourage relative paths.
-        log_event("errors.log", f"edit_file: absolute or parent paths are risky: {path}")
-
     try:
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    except Exception as e:
-        log_event("errors.log", f"edit_file failed to create directories for {path}: {str(e)}")
-        return False
-    
-    # Simple backup before overwrite
-    if os.path.exists(path):
-        backup_path = f"{path}.bak"
-        with open(path, "r") as f_src, open(backup_path, "w") as f_dst:
-            f_dst.write(f_src.read())
-        log_event("commands.log", f"Created backup: {backup_path}")
+        os.makedirs(os.path.dirname(safe_path), exist_ok=True)
+        
+        # Simple backup before overwrite
+        if os.path.exists(safe_path):
+            backup_path = f"{safe_path}.bak"
+            with open(safe_path, "r") as f_src, open(backup_path, "w") as f_dst:
+                f_dst.write(f_src.read())
+            log_event("commands.log", f"Created backup: {backup_path}")
 
-    with open(path, "w") as f:
-        f.write(content)
-    log_event("commands.log", f"Edited file: {path}")
-    return True
+        with open(safe_path, "w") as f:
+            f.write(content)
+        log_event("commands.log", f"Edited file: {path}")
+        return True
+    except Exception as e:
+        log_event("errors.log", f"edit_file failed for {path}: {str(e)}")
+        return False
 
 def list_files(dir_path="."):
-    if os.path.isdir(dir_path):
-        files = os.listdir(dir_path)
+    safe_dir = _enforce_sandbox(dir_path)
+    if safe_dir and os.path.isdir(safe_dir):
+        files = os.listdir(safe_dir)
         log_event("commands.log", f"Listed files in: {dir_path}")
         return files
-    log_event("errors.log", f"list_files failed: dir not found: {dir_path}")
+    log_event("errors.log", f"list_files failed: dir invalid or not found: {dir_path}")
     return []

@@ -3,6 +3,7 @@ import time
 import json
 import hashlib
 from .config import MAX_ITERATIONS, SPEC_PATH, LOOP_DELAY
+from .config import GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY
 from .llm import ask_model, log_event
 from .tools.filesystem import read_file, edit_file, list_files
 from .tools.shell import run_command, git_snapshot
@@ -57,13 +58,20 @@ def print_banner():
         print(f"{color}{line}{reset}")
 
 def main():
+    # 0. Startup Validation (James's SecOps recommendation)
+    if not any([GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY]):
+        print("\nFATAL ERROR: No API keys found for Groq, Mistral, or DeepSeek.")
+        print("Please check your .env file and ensure credentials are correct.")
+        return
+
     # 1. Goal-Stable State Initialization
     project_root = os.getcwd()
     print_banner()
     state = {
         "iteration": 0,
         "memory": [],  # Strategic insights
-        "completed_milestones": [], # EXPLICIT DONE LIST (Felix's Suggestion)
+        "last_tool_output": None, # PERCEPTION FIX
+        "completed_milestones": [], # EXPLICIT DONE LIST
         "project_summary": {
             "goal": "Uninitialized",
             "progress": "Just started",
@@ -72,6 +80,8 @@ def main():
             "next_step": "List files"
         },
         "action_history": [], # Track (action, params_hash) to detect loops
+        "failure_types": [],
+        "consecutive_failure_count": 0,
         "spec_hash": "",
         "consecutive_success_count": 0
     }
@@ -83,7 +93,7 @@ def main():
         "reviewer": load_prompt("reviewer")
     }
 
-    log_event("decisions.log", "42-X-Needle-Agent started (Milestone Registry Mode).")
+    log_event("decisions.log", "42-X-Needle-Agent started.")
 
     while state["iteration"] < MAX_ITERATIONS:
         log_event("decisions.log", f"Starting iteration {state['iteration']}")
@@ -100,7 +110,7 @@ def main():
         state["spec_hash"] = current_spec_hash
         state["project_summary"]["goal"] = spec[:500]
 
-        # B. ROLE ROUTING (Thinking Phase)
+        # B. ROLE ROUTING
         is_failing = state["project_summary"]["last_failure"] is not None
         
         if is_failing:
@@ -118,13 +128,23 @@ def main():
         if len(last_actions) >= 3 and len(set(last_actions)) == 1:
             oscillation_warning = f"\n\nSTALL WARNING: You have repeated the same action 3 times. CHANGE STRATEGY."
 
+        # Inject state summary and project context
+        all_files = list_files(".")
+        # Filter out agent infrastructure to prevent distraction
+        workspace_files = [f for f in all_files if f not in [
+            "agent", "orchestrator", "agent_logs", "README.md", 
+            "ARCHITECTURAL_OVERVIEW.md", "GEMINI.md", ".env", ".venv", 
+            ".git", "__pycache__", "secret_spec"
+        ]]
+
         context = {
             "current_role": role,
             "project_root": project_root,
             "summary": state["project_summary"],
+            "last_tool_output": state["last_tool_output"], # PERCEPTION FIX
             "completed_milestones": state["completed_milestones"],
             "insights": state["memory"][-5:],
-            "files": list_files(".")[:20]
+            "workspace_files": workspace_files[:20]
         }
         
         prompt = f"SPECIFICATION:\n{spec[:1000]}\n\nCONTEXT:\n{json.dumps(context, indent=2)}{oscillation_warning}\n\nDECIDE NEXT ACTION:"
@@ -153,7 +173,6 @@ def main():
         params = decision.get("params", {})
         thought = decision.get("thought", "No thought provided")
         
-        # Milestone tracking
         if "milestone_reached" in decision:
             m = decision["milestone_reached"]
             if m not in state["completed_milestones"]:
@@ -199,7 +218,7 @@ def main():
                 code, out = run_command(cmd)
                 success = (code == 0)
                 result_output = out[:800]
-                if not success: state["failure_types"] = state.get("failure_types", []) + [classify_failure(out)]
+                if not success: state["failure_types"].append(classify_failure(out))
                 if success and ("test" in cmd or "git" in cmd): git_snapshot(f"Success: {cmd}")
             else:
                 result_output = "ERROR: Missing command."
@@ -209,12 +228,14 @@ def main():
             content = read_file(path) if path else None
             success = (content is not None)
             result_output = content[:1000] if success else "File not found."
+            state["last_tool_output"] = result_output # PERCEPTION FIX
 
         elif action == "list_files":
             dir_path = params.get("dir", ".")
             files = list_files(dir_path)
             success = True
             result_output = str(files)
+            state["last_tool_output"] = result_output # PERCEPTION FIX
 
         elif action == "stop":
             log_event("decisions.log", f"Agent stopped explicitly: {params.get('reason')}")
@@ -228,17 +249,18 @@ def main():
             state["project_summary"]["last_failure"] = result_output[:500]
             state["memory"].append(f"FAILED {action}: {result_output[:100]}")
             state["consecutive_success_count"] = 0
+            state["consecutive_failure_count"] += 1
             print(f"RESULT: ❌ FAILURE ({result_output[:100]}...)")
+            
+            if state["consecutive_failure_count"] >= 5:
+                print("\nCRITICAL: 5 consecutive failures detected. Terminating.")
+                break
         else:
             state["project_summary"]["last_failure"] = None
             state["memory"].append(f"SUCCESS {action}: {state['project_summary']['hypothesis'][:100]}")
             state["consecutive_success_count"] += 1
+            state["consecutive_failure_count"] = 0
             print(f"RESULT: ✅ SUCCESS")
-
-        # G. Intelligent Stop
-        if state["consecutive_success_count"] >= 3 and role == "reviewer":
-             log_event("decisions.log", "Reviewer satisfied. Stopping.")
-             break
 
         state["iteration"] += 1
         time.sleep(LOOP_DELAY)

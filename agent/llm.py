@@ -2,7 +2,8 @@ import os
 import json
 import time
 from openai import OpenAI, RateLimitError
-from .config import GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY, PLANNER_MODEL, LOG_DIR
+from .config import GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY, LOG_DIR
+from .config import GROQ_MODELS, MISTRAL_MODELS, DEEPSEEK_MODELS
 from datetime import datetime
 
 def log_event(filename, message):
@@ -58,10 +59,8 @@ def _call_client(client, model, messages, json_mode=True):
         log_event("errors.log", f"API Call failed for model {model}: {str(e)}")
         return None
 
-def ask_model(prompt, system_instruction, model=PLANNER_MODEL):
-    # Log a truncated version to keep files manageable, but send full to API
-    log_prompt = f"System: {system_instruction[:500]}...\nUser: {prompt[:1000]}..."
-    log_event("prompts.log", log_prompt)
+def ask_model(prompt, system_instruction):
+    log_event("prompts.log", f"System: {system_instruction[:500]}...\nUser: {prompt[:1000]}...")
     
     # Ensure "json" is in the prompt for JSON mode
     if "json" not in prompt.lower() and "json" not in system_instruction.lower():
@@ -72,26 +71,32 @@ def ask_model(prompt, system_instruction, model=PLANNER_MODEL):
         {"role": "user", "content": prompt}
     ]
 
-    # 1. Try DeepSeek (High Priority for reliability if Groq is limited)
+    # 1. Try DeepSeek (High Priority)
     if deepseek_client:
-        content = _call_client(deepseek_client, "deepseek-chat", messages)
-        if content: return content
+        for model in DEEPSEEK_MODELS:
+            content = _call_client(deepseek_client, model, messages)
+            if content: return content
 
-    # 2. Try Groq
+    # 2. Try Groq (Primary Fallback)
     if groq_client:
-        content = _call_client(groq_client, model, messages)
-        if content: return content
+        for model in GROQ_MODELS:
+            content = _call_client(groq_client, model, messages)
+            if content: return content
 
-    # 3. Try Mistral Fallback
+    # 3. Try Mistral (Secondary Fallback)
     if mistral_client:
         log_event("decisions.log", "DeepSeek/Groq failed. Falling back to Mistral.")
-        # Use mistral-large-latest as it's their strong model
-        content = _call_client(mistral_client, "mistral-large-latest", messages)
-        if content: return content
+        for model in MISTRAL_MODELS:
+            content = _call_client(mistral_client, model, messages)
+            if content: return content
 
-    # 4. Manual Fallback
-    print("\n--- ALL API PROVIDERS FAILED OR RATE-LIMITED ---")
-    print(f"System: {system_instruction}")
-    print(f"User: {prompt}")
-    print("--- END PROMPT ---\n")
-    return input("Agent Decision (JSON): ")
+    # 4. FATAL FAILOVER: Return an autonomous stop instead of blocking input
+    fatal_reason = "FATAL: All configured API providers failed or are rate-limited."
+    log_event("errors.log", fatal_reason)
+    return json.dumps({
+        "thought": "Emergency stop triggered due to complete API provider failure.",
+        "action": "stop",
+        "params": {"reason": fatal_reason},
+        "hypothesis": "I cannot continue without a functional brain.",
+        "task_status": "System Halt"
+    })
