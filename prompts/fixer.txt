@@ -4,8 +4,15 @@ The previous command failed:
 Analyze the failure in the context of the specification:
 {spec}
 
+Current Task Status: {task_status}
+Recent History:
+{history}
+
 Your task:
-1. Provide a detailed analysis of why the command failed.
+1. Provide a detailed analysis of why the command failed. Consider:
+   - Logic errors in the code.
+   - Project structure issues (e.g., missing __init__.py).
+   - Environment issues (e.g., PYTHONPATH, missing dependencies).
 2. Propose a minimal, targeted fix.
 3. Update your "task_status" to reflect the failure and your recovery plan.
 
@@ -14,5 +21,5 @@ You MUST return a JSON object with: "action", "params", and "task_status".
 
 Available actions: edit_file, run_command, stop.
 
-IMPORTANT: Return valid JSON only. USE THE HISTORY to avoid repeating failed patches.
+IMPORTANT: Return valid JSON only. USE THE HISTORY to avoid repeating failed patches or commands.
 

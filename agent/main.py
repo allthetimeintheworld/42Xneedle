@@ -43,7 +43,11 @@ def main():
 
         # 2. Select Prompt & Add Robustness Layers
         if state["last_command_result"] and state["last_command_result"]["code"] != 0:
-            system_inst = fixer_prompt.replace("{test_output}", state["last_command_result"]["output"]).replace("{spec}", spec[:1000])
+            history_summary = json.dumps(state["history"][-5:], indent=2)
+            system_inst = fixer_prompt.replace("{test_output}", state["last_command_result"]["output"])\
+                                     .replace("{spec}", spec[:1000])\
+                                     .replace("{task_status}", state["task_status"])\
+                                     .replace("{history}", history_summary)
             prompt = "The previous command failed. Analyze the failure and provide a fix."
         else:
             system_inst = planner_prompt
@@ -58,7 +62,9 @@ def main():
 
         # Oscillation Detection
         if len(state["failure_hashes"]) >= 3 and len(set(state["failure_hashes"][-3:])) == 1:
-            prompt += "\n\nCRITICAL WARNING: You have produced the exact same failure 3 times in a row. Your current approach is stuck. You MUST change your strategy fundamentally."
+            oscillation_warning = "\n\nCRITICAL WARNING: You have produced the exact same failure 3 times in a row. Your current approach is stuck. You MUST change your strategy fundamentally (e.g., check environment, project structure, or a completely different code approach)."
+            prompt += oscillation_warning
+            system_inst += oscillation_warning
 
         # 3. Ask Model with Retries
         decision = None
@@ -80,7 +86,8 @@ def main():
 
         # Goal Tracking Update
         if "task_status" in decision:
-            state["task_status"] = decision["task_status"]
+            new_status = decision["task_status"]
+            state["task_status"] = str(new_status) if new_status is not None else "Unknown"
 
         log_event("decisions.log", f"Decision: {action} - {json.dumps(params)}")
 
