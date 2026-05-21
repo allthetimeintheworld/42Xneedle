@@ -50,38 +50,49 @@ def main():
         "consecutive_success_count": 0
     }
 
-    planner_prompt = load_prompt("planner")
-    fixer_prompt = load_prompt("fixer")
+    # Load Role-Based Prompts
+    prompts = {
+        "architect": load_prompt("architect"),
+        "researcher": load_prompt("researcher"),
+        "reviewer": load_prompt("reviewer")
+    }
 
-    log_event("decisions.log", "42-X-Needle-Agent started (Fixing Oscillations).")
+    log_event("decisions.log", "42-X-Needle-Agent started (Multi-Role Mode).")
 
     while state["iteration"] < MAX_ITERATIONS:
         log_event("decisions.log", f"Starting iteration {state['iteration']}")
         
-        # A. Read & Sync Specification
+        # A. Read Specification
         spec = read_file(SPEC_PATH) or "No specification found."
         current_spec_hash = hashlib.md5(spec.encode()).hexdigest()
         if state["spec_hash"] and state["spec_hash"] != current_spec_hash:
-            log_event("decisions.log", "Spec change detected! Resetting for new objective.")
             state["memory"] = ["Resetting state for new task specification."]
             state["iteration"] = 0
             state["consecutive_success_count"] = 0
         state["spec_hash"] = current_spec_hash
         state["project_summary"]["goal"] = spec[:500]
 
-        # B. THE "THINK" PHASE
-        # Enhanced Oscillation Detection (Action-Param based)
+        # B. ROLE ROUTING (Thinking Phase)
+        is_failing = state["project_summary"]["last_failure"] is not None
+        
+        # Determine current role
+        if is_failing:
+            role = "researcher"
+        elif state["consecutive_success_count"] >= 2:
+            role = "reviewer"
+        else:
+            role = "architect"
+            
+        system_inst = prompts[role]
+        
+        # Oscillation Detection
         oscillation_warning = ""
         last_actions = state["action_history"][-3:]
         if len(last_actions) >= 3 and len(set(last_actions)) == 1:
-            oscillation_warning = "\n\nCRITICAL WARNING: You have repeated the EXACT SAME action and parameters 3 times in a row. You are stuck in a loop. You MUST change your strategy, parameters, or tool immediately."
+            oscillation_warning = f"\n\nSTALL WARNING: You have repeated the same action 3 times in {role} mode. CHANGE STRATEGY."
 
-        # Select System Prompt
-        is_failing = state["project_summary"]["last_failure"] is not None
-        system_inst = fixer_prompt if is_failing else planner_prompt
-        
-        # Inject state summary and project context
         context = {
+            "current_role": role,
             "project_root": project_root,
             "summary": state["project_summary"],
             "insights": state["memory"][-5:],
@@ -113,13 +124,19 @@ def main():
         # D. Update State Tracking
         action = decision.get("action")
         params = decision.get("params", {})
+        thought = decision.get("thought", "No thought provided")
+        
         params_hash = hashlib.md5(json.dumps(params, sort_keys=True).encode()).hexdigest()
         state["action_history"].append(f"{action}:{params_hash}")
         
         state["project_summary"]["hypothesis"] = decision.get("hypothesis", state["project_summary"]["hypothesis"])
         state["project_summary"]["next_step"] = decision.get("task_status", "Proceeding...")
 
-        log_event("decisions.log", f"Action: {action} | Hypothesis: {state['project_summary']['hypothesis']}")
+        log_event("decisions.log", f"Role: {role} | Action: {action} | Thought: {thought}")
+
+        print(f"\n[{state['iteration']}] ROLE: {role.upper()}")
+        print(f"THOUGHT: {thought}")
+        print(f"ACTION: {action}({json.dumps(params)})")
 
         # E. THE "ACT" PHASE: Execute Tools
         result_output = ""
@@ -188,10 +205,12 @@ def main():
             state["project_summary"]["last_failure"] = result_output[:500]
             state["memory"].append(f"FAILED {action}: {result_output[:100]}")
             state["consecutive_success_count"] = 0
+            print(f"RESULT: ❌ FAILURE\n{result_output[:300]}...")
         else:
             state["project_summary"]["last_failure"] = None
             state["memory"].append(f"SUCCESS {action}: {state['project_summary']['hypothesis']}")
             state["consecutive_success_count"] += 1
+            print(f"RESULT: ✅ SUCCESS\n{result_output[:300]}...")
 
         # G. Autonomous Stopping Rule
         if state["consecutive_success_count"] >= 3:

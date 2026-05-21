@@ -15,6 +15,7 @@ CORE PRINCIPLES:
 - USE INSIGHTS: Look at the "insights" from previous turns. Do not repeat failed hypotheses.
 - PLAN AHEAD: Propose actions that move the "progress" forward.
 - BE SURGICAL: Make minimal changes to achieve the goal.
+- FORMATTING: For .txt files or summaries, always include \n line breaks (e.g., every 80-100 characters) to ensure the file is readable and not a single long line.
 
 Example:
 {
