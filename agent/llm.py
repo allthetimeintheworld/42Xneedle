@@ -17,7 +17,8 @@ if GROQ_API_KEY:
     groq_client = OpenAI(
         api_key=GROQ_API_KEY,
         base_url="https://api.groq.com/openai/v1",
-        max_retries=3
+        max_retries=3,
+        timeout=30.0
     )
 
 mistral_client = None
@@ -25,7 +26,8 @@ if MISTRAL_API_KEY:
     mistral_client = OpenAI(
         api_key=MISTRAL_API_KEY,
         base_url="https://api.mistral.ai/v1",
-        max_retries=3
+        max_retries=3,
+        timeout=30.0
     )
 
 deepseek_client = None
@@ -33,7 +35,8 @@ if DEEPSEEK_API_KEY:
     deepseek_client = OpenAI(
         api_key=DEEPSEEK_API_KEY,
         base_url="https://api.deepseek.com",
-        max_retries=3
+        max_retries=3,
+        timeout=30.0
     )
 
 def _call_client(client, model, messages, json_mode=True):
