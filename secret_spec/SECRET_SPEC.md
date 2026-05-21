@@ -1,9 +1,12 @@
-# Task: Short book s
+# Task: Short book summary.
 
 ## Goal
-return a .txt file to 'src/' containing a 200 word summary of the book To Kill a Mockingbird
+Return a .txt file to 'src/' containing a 200 word summary of the book To Kill a Mockingbird.
 
 ## Requirements
- thoughtful response using the word dolphin as often as possible.
+- Provide a thoughtful summary of the plot and themes.
+- Use the word "dolphin" as often as possible throughout the summary.
+- The file must be named `src/mockingbird_review.txt`.
+
 ## Final Action
-Run the tests. If they pass, commit the code with the message "good reads review"
+Run a command to count the words (ensure ~200). If successful, commit the code with the message "good reads review" and stop.
