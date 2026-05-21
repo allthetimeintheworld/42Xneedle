@@ -70,6 +70,7 @@ def main():
     state = {
         "iteration": 0,
         "memory": [],  # Strategic insights
+        "last_tool_output": None, # PERCEPTION FIX
         "completed_milestones": [], # EXPLICIT DONE LIST
         "project_summary": {
             "goal": "Uninitialized",
@@ -92,7 +93,7 @@ def main():
         "reviewer": load_prompt("reviewer")
     }
 
-    log_event("decisions.log", "42-X-Needle-Agent started (Milestone Registry Mode).")
+    log_event("decisions.log", "42-X-Needle-Agent started.")
 
     while state["iteration"] < MAX_ITERATIONS:
         log_event("decisions.log", f"Starting iteration {state['iteration']}")
@@ -109,7 +110,7 @@ def main():
         state["spec_hash"] = current_spec_hash
         state["project_summary"]["goal"] = spec[:500]
 
-        # B. ROLE ROUTING (Thinking Phase)
+        # B. ROLE ROUTING
         is_failing = state["project_summary"]["last_failure"] is not None
         
         if is_failing:
@@ -140,6 +141,7 @@ def main():
             "current_role": role,
             "project_root": project_root,
             "summary": state["project_summary"],
+            "last_tool_output": state["last_tool_output"], # PERCEPTION FIX
             "completed_milestones": state["completed_milestones"],
             "insights": state["memory"][-5:],
             "workspace_files": workspace_files[:20]
@@ -171,7 +173,6 @@ def main():
         params = decision.get("params", {})
         thought = decision.get("thought", "No thought provided")
         
-        # Milestone tracking
         if "milestone_reached" in decision:
             m = decision["milestone_reached"]
             if m not in state["completed_milestones"]:
@@ -217,7 +218,7 @@ def main():
                 code, out = run_command(cmd)
                 success = (code == 0)
                 result_output = out[:800]
-                if not success: state["failure_types"] = state.get("failure_types", []) + [classify_failure(out)]
+                if not success: state["failure_types"].append(classify_failure(out))
                 if success and ("test" in cmd or "git" in cmd): git_snapshot(f"Success: {cmd}")
             else:
                 result_output = "ERROR: Missing command."
@@ -227,12 +228,14 @@ def main():
             content = read_file(path) if path else None
             success = (content is not None)
             result_output = content[:1000] if success else "File not found."
+            state["last_tool_output"] = result_output # PERCEPTION FIX
 
         elif action == "list_files":
             dir_path = params.get("dir", ".")
             files = list_files(dir_path)
             success = True
             result_output = str(files)
+            state["last_tool_output"] = result_output # PERCEPTION FIX
 
         elif action == "stop":
             log_event("decisions.log", f"Agent stopped explicitly: {params.get('reason')}")
@@ -249,23 +252,15 @@ def main():
             state["consecutive_failure_count"] += 1
             print(f"RESULT: ❌ FAILURE ({result_output[:100]}...)")
             
-            # G. Infinite Loop Circuit Breaker (Deep Fix)
             if state["consecutive_failure_count"] >= 5:
-                msg = "CRITICAL: 5 consecutive failures detected. Terminating to prevent infinite loop."
-                log_event("errors.log", msg)
-                print(f"\n{msg}")
+                print("\nCRITICAL: 5 consecutive failures detected. Terminating.")
                 break
         else:
             state["project_summary"]["last_failure"] = None
             state["memory"].append(f"SUCCESS {action}: {state['project_summary']['hypothesis'][:100]}")
             state["consecutive_success_count"] += 1
-            state["consecutive_failure_count"] = 0 # Reset on success
+            state["consecutive_failure_count"] = 0
             print(f"RESULT: ✅ SUCCESS")
-
-        # G. Intelligent Stop
-        if state["consecutive_success_count"] >= 3 and role == "reviewer":
-             log_event("decisions.log", "Reviewer satisfied. Stopping.")
-             break
 
         state["iteration"] += 1
         time.sleep(LOOP_DELAY)
