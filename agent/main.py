@@ -3,6 +3,7 @@ import time
 import json
 import hashlib
 from .config import MAX_ITERATIONS, SPEC_PATH, LOOP_DELAY
+from .config import GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY
 from .llm import ask_model, log_event
 from .tools.filesystem import read_file, edit_file, list_files
 from .tools.shell import run_command, git_snapshot
@@ -57,13 +58,19 @@ def print_banner():
         print(f"{color}{line}{reset}")
 
 def main():
+    # 0. Startup Validation (James's SecOps recommendation)
+    if not any([GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY]):
+        print("\nFATAL ERROR: No API keys found for Groq, Mistral, or DeepSeek.")
+        print("Please check your .env file and ensure credentials are correct.")
+        return
+
     # 1. Goal-Stable State Initialization
     project_root = os.getcwd()
     print_banner()
     state = {
         "iteration": 0,
         "memory": [],  # Strategic insights
-        "completed_milestones": [], # EXPLICIT DONE LIST (Felix's Suggestion)
+        "completed_milestones": [], # EXPLICIT DONE LIST
         "project_summary": {
             "goal": "Uninitialized",
             "progress": "Just started",
@@ -72,6 +79,8 @@ def main():
             "next_step": "List files"
         },
         "action_history": [], # Track (action, params_hash) to detect loops
+        "failure_types": [],
+        "consecutive_failure_count": 0,
         "spec_hash": "",
         "consecutive_success_count": 0
     }
@@ -118,13 +127,22 @@ def main():
         if len(last_actions) >= 3 and len(set(last_actions)) == 1:
             oscillation_warning = f"\n\nSTALL WARNING: You have repeated the same action 3 times. CHANGE STRATEGY."
 
+        # Inject state summary and project context
+        all_files = list_files(".")
+        # Filter out agent infrastructure to prevent distraction
+        workspace_files = [f for f in all_files if f not in [
+            "agent", "orchestrator", "agent_logs", "README.md", 
+            "ARCHITECTURAL_OVERVIEW.md", "GEMINI.md", ".env", ".venv", 
+            ".git", "__pycache__", "secret_spec"
+        ]]
+
         context = {
             "current_role": role,
             "project_root": project_root,
             "summary": state["project_summary"],
             "completed_milestones": state["completed_milestones"],
             "insights": state["memory"][-5:],
-            "files": list_files(".")[:20]
+            "workspace_files": workspace_files[:20]
         }
         
         prompt = f"SPECIFICATION:\n{spec[:1000]}\n\nCONTEXT:\n{json.dumps(context, indent=2)}{oscillation_warning}\n\nDECIDE NEXT ACTION:"
@@ -228,11 +246,20 @@ def main():
             state["project_summary"]["last_failure"] = result_output[:500]
             state["memory"].append(f"FAILED {action}: {result_output[:100]}")
             state["consecutive_success_count"] = 0
+            state["consecutive_failure_count"] += 1
             print(f"RESULT: ❌ FAILURE ({result_output[:100]}...)")
+            
+            # G. Infinite Loop Circuit Breaker (Deep Fix)
+            if state["consecutive_failure_count"] >= 5:
+                msg = "CRITICAL: 5 consecutive failures detected. Terminating to prevent infinite loop."
+                log_event("errors.log", msg)
+                print(f"\n{msg}")
+                break
         else:
             state["project_summary"]["last_failure"] = None
             state["memory"].append(f"SUCCESS {action}: {state['project_summary']['hypothesis'][:100]}")
             state["consecutive_success_count"] += 1
+            state["consecutive_failure_count"] = 0 # Reset on success
             print(f"RESULT: ✅ SUCCESS")
 
         # G. Intelligent Stop

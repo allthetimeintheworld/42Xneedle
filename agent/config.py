@@ -20,9 +20,13 @@ SPEC_PATH = "secret_spec/SECRET_SPEC.md"
 MAX_ITERATIONS = 40 # Increased for more complex autonomous tasks
 LOOP_DELAY = int(os.environ.get("LOOP_DELAY", 2))
 
-# Model Constants
-PLANNER_MODEL = "llama-3.3-70b-versatile"
-CODER_MODEL = "llama-3.3-70b-versatile"  # Fallback to versatile if Qwen isn't available
+# Model Fallback Lists (Priority Order)
+GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "llama-3.1-8b-instant"]
+MISTRAL_MODELS = ["mistral-large-latest", "mistral-small-latest"]
+DEEPSEEK_MODELS = ["deepseek-chat"]
+
+PLANNER_MODEL = GROQ_MODELS[0]
+CODER_MODEL = GROQ_MODELS[0]
 
 # API Keys
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
