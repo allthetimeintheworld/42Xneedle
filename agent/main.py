@@ -8,6 +8,9 @@ from .tools.filesystem import read_file, edit_file, list_files
 from .tools.shell import run_command, git_snapshot
 from .tools.parser import parse_action
 
+# Configuration for stability
+VALID_ACTIONS = {"edit_file", "run_command", "read_file", "list_files", "stop"}
+
 def load_prompt(name):
     path = f"prompts/{name}.txt"
     if os.path.exists(path):
@@ -15,145 +18,192 @@ def load_prompt(name):
             return f.read()
     return "You are a coding agent. Return JSON."
 
-def get_output_hash(output):
-    if not output: return ""
-    return hashlib.md5(output.encode()).hexdigest()
+def classify_failure(output):
+    """Classifies a command failure into actionable types."""
+    if not output: return "UNKNOWN"
+    low_out = output.lower()
+    if "syntaxerror" in low_out or "invalid syntax" in low_out:
+        return "SYNTAX"
+    if "assertionerror" in low_out or "failed" in low_out:
+        return "ASSERTION"
+    if "modulenotfounderror" in low_out or "not found" in low_out:
+        return "ENVIRONMENT"
+    if "timeout" in low_out:
+        return "TIMEOUT"
+    return "RUNTIME"
 
 def main():
+    # 1. Goal-Stable State Initialization
+    project_root = os.getcwd()
     state = {
         "iteration": 0,
-        "last_command_result": None,
-        "last_read_content": None,
-        "last_file_list": None,
-        "history": [],
-        "failure_hashes": [],
-        "task_status": "Starting task..."
+        "memory": [],  # Strategic insights
+        "project_summary": {
+            "goal": "Uninitialized",
+            "progress": "Just started",
+            "last_failure": None,
+            "hypothesis": "Initial exploration",
+            "next_step": "List files"
+        },
+        "action_history": [], # Track (action, params_hash) to detect loops
+        "spec_hash": "",
+        "consecutive_success_count": 0
     }
 
     planner_prompt = load_prompt("planner")
     fixer_prompt = load_prompt("fixer")
 
-    log_event("decisions.log", "42-X-Needle-Agent started.")
+    log_event("decisions.log", "42-X-Needle-Agent started (Fixing Oscillations).")
 
     while state["iteration"] < MAX_ITERATIONS:
         log_event("decisions.log", f"Starting iteration {state['iteration']}")
-
-        # 1. Read Spec
+        
+        # A. Read & Sync Specification
         spec = read_file(SPEC_PATH) or "No specification found."
+        current_spec_hash = hashlib.md5(spec.encode()).hexdigest()
+        if state["spec_hash"] and state["spec_hash"] != current_spec_hash:
+            log_event("decisions.log", "Spec change detected! Resetting for new objective.")
+            state["memory"] = ["Resetting state for new task specification."]
+            state["iteration"] = 0
+            state["consecutive_success_count"] = 0
+        state["spec_hash"] = current_spec_hash
+        state["project_summary"]["goal"] = spec[:500]
 
-        # 2. Select Prompt & Add Robustness Layers
-        if state["last_command_result"] and state["last_command_result"]["code"] != 0:
-            history_summary = json.dumps(state["history"][-5:], indent=2)
-            system_inst = fixer_prompt.replace("{test_output}", state["last_command_result"]["output"])\
-                                     .replace("{spec}", spec[:1000])\
-                                     .replace("{task_status}", state["task_status"])\
-                                     .replace("{history}", history_summary)
-            prompt = "The previous command failed. Analyze the failure and provide a fix."
-        else:
-            system_inst = planner_prompt
-            context = {
-                "iteration": state["iteration"],
-                "task_status": state["task_status"],
-                "history": state["history"][-5:], # Last 5 steps for short-term memory
-                "last_file_list": state["last_file_list"],
-                "last_read_content": state["last_read_content"][:500] if state["last_read_content"] else "None"
-            }
-            prompt = f"Spec: {spec[:1000]}\n\nCurrent State:\n{json.dumps(context, indent=2)}\n\nWhat is the next action?"
+        # B. THE "THINK" PHASE
+        # Enhanced Oscillation Detection (Action-Param based)
+        oscillation_warning = ""
+        last_actions = state["action_history"][-3:]
+        if len(last_actions) >= 3 and len(set(last_actions)) == 1:
+            oscillation_warning = "\n\nCRITICAL WARNING: You have repeated the EXACT SAME action and parameters 3 times in a row. You are stuck in a loop. You MUST change your strategy, parameters, or tool immediately."
 
-        # Oscillation Detection
-        if len(state["failure_hashes"]) >= 3 and len(set(state["failure_hashes"][-3:])) == 1:
-            oscillation_warning = "\n\nCRITICAL WARNING: You have produced the exact same failure 3 times in a row. Your current approach is stuck. You MUST change your strategy fundamentally (e.g., check environment, project structure, or a completely different code approach)."
-            prompt += oscillation_warning
-            system_inst += oscillation_warning
+        # Select System Prompt
+        is_failing = state["project_summary"]["last_failure"] is not None
+        system_inst = fixer_prompt if is_failing else planner_prompt
+        
+        # Inject state summary and project context
+        context = {
+            "project_root": project_root,
+            "summary": state["project_summary"],
+            "insights": state["memory"][-5:],
+            "files": list_files(".")[:20]
+        }
+        
+        prompt = f"SPECIFICATION:\n{spec[:1000]}\n\nCONTEXT:\n{json.dumps(context, indent=2)}{oscillation_warning}\n\nDECIDE NEXT ACTION:"
 
-        # 3. Ask Model with Retries
+        # C. LLM Call with Schema Enforcement
         decision = None
         for retry in range(2):
             response_str = ask_model(prompt, system_inst)
             decision, error = parse_action(response_str)
             if not error:
-                break
-            log_event("errors.log", f"JSON Parse Error (Retry {retry}): {error}")
-            prompt += f"\n\nERROR: Your last response was not valid JSON: {error}. Please return ONLY a valid JSON object."
+                action = decision.get("action")
+                if action in VALID_ACTIONS:
+                    break
+                else:
+                    error = f"Invalid action '{action}'. Must be one of {VALID_ACTIONS}"
+            
+            log_event("errors.log", f"Refining response (Retry {retry}): {error}")
+            prompt += f"\n\nERROR: {error}. Return valid JSON with a supported 'action'."
 
         if not decision:
-            log_event("errors.log", "Failed to get valid JSON after retries. Skipping iteration.")
+            log_event("errors.log", "LLM failed to provide valid instruction. Skipping turn.")
             state["iteration"] += 1
             continue
 
+        # D. Update State Tracking
         action = decision.get("action")
         params = decision.get("params", {})
+        params_hash = hashlib.md5(json.dumps(params, sort_keys=True).encode()).hexdigest()
+        state["action_history"].append(f"{action}:{params_hash}")
+        
+        state["project_summary"]["hypothesis"] = decision.get("hypothesis", state["project_summary"]["hypothesis"])
+        state["project_summary"]["next_step"] = decision.get("task_status", "Proceeding...")
 
-        # Goal Tracking Update
-        if "task_status" in decision:
-            new_status = decision["task_status"]
-            state["task_status"] = str(new_status) if new_status is not None else "Unknown"
+        log_event("decisions.log", f"Action: {action} | Hypothesis: {state['project_summary']['hypothesis']}")
 
-        log_event("decisions.log", f"Decision: {action} - {json.dumps(params)}")
-
-        # 4. Execute Action
-        error_msg = None
+        # E. THE "ACT" PHASE: Execute Tools
+        result_output = ""
+        success = False
+        
         if action == "edit_file":
-            path = params.get("path")
-            content = params.get("content")
+            path, content = params.get("path"), params.get("content")
             if path and content is not None:
-                if edit_file(path, content):
-                    log_event("decisions.log", f"Successfully edited {path}")
-                    # Syntax Gate
-                    if path.endswith(".py"):
-                        code, out = run_command(f"python3 -m py_compile {path}")
-                        if code != 0:
-                            error_msg = f"Syntax error introduced in {path}: {out}"
+                # Syntax Gate (Felix recommendation)
+                if path.endswith(".py"):
+                    # Use temporary file to check syntax before overwriting
+                    tmp_path = f"{path}.tmp"
+                    if edit_file(tmp_path, content):
+                        code, out = run_command(f"python3 -m py_compile {tmp_path}")
+                        os.remove(tmp_path)
+                        if code == 0:
+                            success = edit_file(path, content)
+                            result_output = f"File {path} updated successfully."
+                        else:
+                            success = False
+                            result_output = f"SYNTAX ERROR PREVENTED: Your proposed code for {path} was invalid:\n{out}"
+                else:
+                    success = edit_file(path, content)
+                    result_output = f"File {path} written."
             else:
-                error_msg = "edit_file requires both 'path' and 'content' parameters."
+                result_output = "ERROR: Missing path or content."
+
+        elif action == "run_command":
+            cmd = params.get("command")
+            if cmd:
+                code, out = run_command(cmd)
+                success = (code == 0)
+                result_output = out[:1000] # Token efficiency (Luis recommendation)
+                
+                # Update failure clustering
+                if not success:
+                    state["failure_types"].append(classify_failure(out))
+                
+                # Auto-Snapshot
+                if success and ("test" in cmd or "git" in cmd):
+                    git_snapshot(f"Success in {state['iteration']}: {cmd}")
+            else:
+                result_output = "ERROR: Missing command."
 
         elif action == "read_file":
             path = params.get("path")
-            if path:
-                content = read_file(path)
-                state["last_read_content"] = content
-            else:
-                error_msg = "read_file requires 'path' parameter."
+            content = read_file(path) if path else None
+            success = (content is not None)
+            result_output = content[:1000] if success else "File not found."
 
         elif action == "list_files":
             dir_path = params.get("dir", ".")
-            state["last_file_list"] = list_files(dir_path)
-
-        elif action == "run_command":
-            command = params.get("command")
-            if command:
-                code, output = run_command(command)
-                state["last_command_result"] = {"code": code, "output": output}
-                log_event("commands.log", f"Command Output ({command}):\n{output}")
-
-                # Track failure hashes for oscillation detection
-                if code != 0:
-                    state["failure_hashes"].append(get_output_hash(output))
-
-                if code == 0 and ("test" in command or "git" in command):
-                    git_snapshot(f"Iteration {state['iteration']} - {command} passed")
-            else:
-                error_msg = "run_command requires 'command' parameter."
+            files = list_files(dir_path)
+            success = True
+            result_output = f"Files in {dir_path}: {str(files)}"
 
         elif action == "stop":
-            log_event("decisions.log", f"Agent stopped: {params.get('reason', 'No reason provided')}")
+            log_event("decisions.log", f"Agent stopped: {params.get('reason')}")
             break
 
-        if error_msg:
-            log_event("errors.log", error_msg)
-            state["last_command_result"] = {"code": 1, "output": f"ERROR: {error_msg}"}
+        # F. Update Summary & Reasoning Memory
+        state["project_summary"]["last_action"] = action
+        state["project_summary"]["last_result"] = "SUCCESS" if success else "FAILURE"
+        
+        if not success:
+            state["project_summary"]["last_failure"] = result_output[:500]
+            state["memory"].append(f"FAILED {action}: {result_output[:100]}")
+            state["consecutive_success_count"] = 0
+        else:
+            state["project_summary"]["last_failure"] = None
+            state["memory"].append(f"SUCCESS {action}: {state['project_summary']['hypothesis']}")
+            state["consecutive_success_count"] += 1
 
-        # Update History
-        state["history"].append({
-            "iteration": state["iteration"],
-            "action": action,
-            "params": params,
-            "success": (error_msg is None and (not state["last_command_result"] or state["last_command_result"]["code"] == 0))
-        })
+        # G. Autonomous Stopping Rule
+        if state["consecutive_success_count"] >= 3:
+             # Stop if stable and a terminal command (like git or test) was successful
+             if any(x in str(state["memory"][-5:]) for x in ["SUCCESS run_command: git", "SUCCESS run_command: pytest"]):
+                 log_event("decisions.log", "System stabilized after successful terminal actions. Stopping.")
+                 break
 
         state["iteration"] += 1
         time.sleep(LOOP_DELAY)
 
     log_event("decisions.log", "42-X-Needle-Agent finished.")
+
 if __name__ == "__main__":
     main()

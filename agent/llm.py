@@ -59,7 +59,9 @@ def _call_client(client, model, messages, json_mode=True):
         return None
 
 def ask_model(prompt, system_instruction, model=PLANNER_MODEL):
-    log_event("prompts.log", f"System: {system_instruction}\nUser: {prompt}")
+    # Log a truncated version to keep files manageable, but send full to API
+    log_prompt = f"System: {system_instruction[:500]}...\nUser: {prompt[:1000]}..."
+    log_event("prompts.log", log_prompt)
     
     # Ensure "json" is in the prompt for JSON mode
     if "json" not in prompt.lower() and "json" not in system_instruction.lower():
