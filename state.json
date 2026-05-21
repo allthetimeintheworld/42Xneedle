@@ -1,0 +1,33 @@
+{
+  "iteration": 0,
+  "max_iterations": 40,
+  "spec_path": "dummy_spec.md",
+  "spec_text": "Build a CLI that prints \"hello world\".\n",
+  "plan": [
+    "step 1: stub",
+    "step 2: stub"
+  ],
+  "current_step_index": 0,
+  "last_test_result": null,
+  "recent_actions": [
+    {
+      "iteration": 0,
+      "timestamp": "2026-05-21T12:18:47.166872Z",
+      "action": "stop",
+      "args": {
+        "reason": "stub model - exiting immediately"
+      },
+      "reasoning": "stub call_model always stops",
+      "result_summary": "stop: stub model - exiting immediately",
+      "success": true
+    }
+  ],
+  "older_trajectory_summary": "",
+  "files_touched": [],
+  "started_at": "2026-05-21T12:18:47.164501Z",
+  "done": true,
+  "stop_reason": "stub model - exiting immediately",
+  "fingerprints": [
+    "53f5f02aa28930cc"
+  ]
+}

@@ -1,0 +1,2 @@
+2026-05-21 14:18:47,165 iter 0 planning_result steps=["step 1: stub", "step 2: stub"]
+2026-05-21 14:18:47,166 iter 0 decision action=stop args={"reason": "stub model - exiting immediately"} reasoning=stub call_model always stops
