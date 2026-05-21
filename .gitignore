@@ -2,5 +2,5 @@ agent_logs/
 __pycache__/
 *.pyc
 .env
-secret_spec/
+#secret_spec/
 .venv/
