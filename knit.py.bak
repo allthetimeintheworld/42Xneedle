@@ -7,7 +7,7 @@ from src.validator import validate
 from src.simulator import simulate
 
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] != 'compile':
+    if len(sys.argv) < 3 or sys.argv[1] != 'compile':
         print("Usage: python knit.py compile <input_file>", file=sys.stderr)
         sys.exit(1)
     input_file = sys.argv[2]
@@ -15,7 +15,7 @@ def main():
         with open(input_file, 'r') as f:
             source = f.read()
     except FileNotFoundError:
-        print(f"Error: file not found: {input_file}", file=sys.stderr)
+        print(f"Error: file '{input_file}' not found.", file=sys.stderr)
         sys.exit(1)
     try:
         ast = parse(source)
