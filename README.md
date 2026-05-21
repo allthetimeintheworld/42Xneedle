@@ -1,5 +1,8 @@
 # 42-X-Needle-Agent Setup
 
+> **TASK SOURCE OF TRUTH**: The active task specification is located in `secret_spec/SECRET_SPEC.md`. 
+> Do not waste iterations reading this README for task requirements; it is for setup only.
+
 ## Quick Start
 1. **Initialize Environment**:
    ```bash
