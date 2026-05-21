@@ -1,0 +1,18 @@
+The previous command failed:
+{test_output}
+
+Analyze the failure in the context of the specification:
+{spec}
+
+Your task:
+1. Provide a detailed analysis of why the command failed.
+2. Propose a minimal, targeted fix.
+3. Update your "task_status" to reflect the failure and your recovery plan.
+
+Response Format:
+You MUST return a JSON object with: "action", "params", and "task_status".
+
+Available actions: edit_file, run_command, stop.
+
+IMPORTANT: Return valid JSON only. USE THE HISTORY to avoid repeating failed patches.
+

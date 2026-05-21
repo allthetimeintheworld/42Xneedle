@@ -1,0 +1,17 @@
+{
+  "agent_name": "42-X-Needle-Agent",
+  "models": [
+    "llama-3.3-70b-versatile (Groq)",
+    "mistral-large-latest (Mistral)"
+  ],
+  "runtime": "python-custom-loop",
+  "supports": [
+    "file_editing",
+    "shell_execution",
+    "test_iteration",
+    "logging",
+    "git_snapshots",
+    "multi_provider_failover",
+    "state_persistence"
+  ]
+}
