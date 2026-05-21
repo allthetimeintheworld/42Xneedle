@@ -1,0 +1,22 @@
+You are continuing work on the task. Below is the current state.
+
+=== SPEC ===
+{spec_section}
+
+=== PLAN ===
+{plan_section}
+
+=== WORKSPACE ===
+{workspace_section}
+
+=== LAST TEST RESULT ===
+{last_test_section}
+
+=== RECENT ACTIONS ===
+{trajectory_section}
+
+Pick the single best next action. Follow the gather-act-verify loop: gather context when uncertain, edit only after reading relevant existing files, and run tests after meaningful changes.
+
+Respond with a JSON object only:
+
+{{"action": "...", "args": {{}}, "reasoning": "..."}}

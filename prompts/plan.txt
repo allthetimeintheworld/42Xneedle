@@ -1,0 +1,13 @@
+Read the following technical specification. Break it into 5 to 10 concrete, ordered implementation steps that an agent can execute one at a time.
+
+Each step should be a single, actionable engineering task, for example, "create a CLI entry point in main.py that parses --input and --output flags," not "implement the program."
+
+Order the steps so that earlier steps enable later ones. Put the minimal working version first; add edge cases and error handling later. Make running the public test suite one of the steps.
+
+Respond with a JSON object of exactly this shape, with no prose, no markdown fences, and no extra keys:
+
+{{"steps": ["step 1", "step 2", "step 3"]}}
+
+The specification:
+
+{spec_text}
