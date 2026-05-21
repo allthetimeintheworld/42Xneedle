@@ -1,0 +1,19 @@
+The previous action resulted in a FAILURE.
+
+FAILURE CONTEXT:
+The last failure is provided in the "summary" of the CONTEXT.
+
+YOUR TASK:
+1. Classify the failure (Logic, Syntax, Environment, or Hallucination).
+2. Abandon your previous "hypothesis" if it has failed multiple times.
+3. Propose a RECOVERY ACTION.
+
+RESPONSE FORMAT:
+You MUST return a JSON object with:
+1. "action": The immediate recovery tool.
+2. "params": Parameters for the action.
+3. "hypothesis": A NEW theory on why the previous one failed and how this fix will work.
+4. "task_status": Update to "Recovering from [Failure Type]".
+
+STALL WARNING:
+If you see a STALL WARNING in the prompt, your current strategy is fundamentally flawed. You MUST change your approach completely.
