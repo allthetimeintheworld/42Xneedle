@@ -20,9 +20,9 @@
 
 ## Architecture
 - **`agent/main.py`**: Core loop and orchestration.
-- **`agent/llm.py`**: OpenAI SDK integration (Groq).
+- **`agent/llm.py`**: OpenAI SDK integration.
 - **`agent/tools/`**: Modular file, shell, and parsing tools.
-- **`prompts/`**: Planner and Fixer system prompts.
+- **`orchestrator/`**: Multi-role (Architect, Researcher, Reviewer) prompts.
 
 ## Logging
 Check `agent_logs/` for:

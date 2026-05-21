@@ -12,7 +12,7 @@ from .tools.parser import parse_action
 VALID_ACTIONS = {"edit_file", "run_command", "read_file", "list_files", "stop"}
 
 def load_prompt(name):
-    path = f"prompts/{name}.txt"
+    path = f"orchestrator/{name}.txt"
     if os.path.exists(path):
         with open(path, "r") as f:
             return f.read()
@@ -32,12 +32,38 @@ def classify_failure(output):
         return "TIMEOUT"
     return "RUNTIME"
 
+def print_banner():
+    colors = [
+        "\033[91m", # Red
+        "\033[93m", # Yellow
+        "\033[92m", # Green
+        "\033[96m", # Cyan
+        "\033[94m", # Blue
+        "\033[95m"  # Magenta
+    ]
+    reset = "\033[0m"
+    banner = r"""
+  _____ __  __          _____ 
+ |___ /|  \/  |   /\   / ____|
+   |_ \| |\/| |  /  \ | |     
+  ___) | |  | | / /\ \| |     
+ |____/|_|  |_|/_/    \_\_____|
+                               
+    42-X-Needle Autonomous Agent
+    """
+    lines = banner.split("\n")
+    for i, line in enumerate(lines):
+        color = colors[i % len(colors)]
+        print(f"{color}{line}{reset}")
+
 def main():
     # 1. Goal-Stable State Initialization
     project_root = os.getcwd()
+    print_banner()
     state = {
         "iteration": 0,
         "memory": [],  # Strategic insights
+        "completed_milestones": [], # EXPLICIT DONE LIST (Felix's Suggestion)
         "project_summary": {
             "goal": "Uninitialized",
             "progress": "Just started",
@@ -57,7 +83,7 @@ def main():
         "reviewer": load_prompt("reviewer")
     }
 
-    log_event("decisions.log", "42-X-Needle-Agent started (Multi-Role Mode).")
+    log_event("decisions.log", "42-X-Needle-Agent started (Milestone Registry Mode).")
 
     while state["iteration"] < MAX_ITERATIONS:
         log_event("decisions.log", f"Starting iteration {state['iteration']}")
@@ -66,7 +92,9 @@ def main():
         spec = read_file(SPEC_PATH) or "No specification found."
         current_spec_hash = hashlib.md5(spec.encode()).hexdigest()
         if state["spec_hash"] and state["spec_hash"] != current_spec_hash:
+            log_event("decisions.log", "Spec change detected! Resetting for new objective.")
             state["memory"] = ["Resetting state for new task specification."]
+            state["completed_milestones"] = []
             state["iteration"] = 0
             state["consecutive_success_count"] = 0
         state["spec_hash"] = current_spec_hash
@@ -75,7 +103,6 @@ def main():
         # B. ROLE ROUTING (Thinking Phase)
         is_failing = state["project_summary"]["last_failure"] is not None
         
-        # Determine current role
         if is_failing:
             role = "researcher"
         elif state["consecutive_success_count"] >= 2:
@@ -89,19 +116,20 @@ def main():
         oscillation_warning = ""
         last_actions = state["action_history"][-3:]
         if len(last_actions) >= 3 and len(set(last_actions)) == 1:
-            oscillation_warning = f"\n\nSTALL WARNING: You have repeated the same action 3 times in {role} mode. CHANGE STRATEGY."
+            oscillation_warning = f"\n\nSTALL WARNING: You have repeated the same action 3 times. CHANGE STRATEGY."
 
         context = {
             "current_role": role,
             "project_root": project_root,
             "summary": state["project_summary"],
+            "completed_milestones": state["completed_milestones"],
             "insights": state["memory"][-5:],
             "files": list_files(".")[:20]
         }
         
         prompt = f"SPECIFICATION:\n{spec[:1000]}\n\nCONTEXT:\n{json.dumps(context, indent=2)}{oscillation_warning}\n\nDECIDE NEXT ACTION:"
 
-        # C. LLM Call with Schema Enforcement
+        # C. LLM Call
         decision = None
         for retry in range(2):
             response_str = ask_model(prompt, system_inst)
@@ -117,7 +145,6 @@ def main():
             prompt += f"\n\nERROR: {error}. Return valid JSON with a supported 'action'."
 
         if not decision:
-            log_event("errors.log", "LLM failed to provide valid instruction. Skipping turn.")
             state["iteration"] += 1
             continue
 
@@ -126,6 +153,12 @@ def main():
         params = decision.get("params", {})
         thought = decision.get("thought", "No thought provided")
         
+        # Milestone tracking
+        if "milestone_reached" in decision:
+            m = decision["milestone_reached"]
+            if m not in state["completed_milestones"]:
+                state["completed_milestones"].append(m)
+
         params_hash = hashlib.md5(json.dumps(params, sort_keys=True).encode()).hexdigest()
         state["action_history"].append(f"{action}:{params_hash}")
         
@@ -133,51 +166,41 @@ def main():
         state["project_summary"]["next_step"] = decision.get("task_status", "Proceeding...")
 
         log_event("decisions.log", f"Role: {role} | Action: {action} | Thought: {thought}")
-
-        print(f"\n[{state['iteration']}] ROLE: {role.upper()}")
-        print(f"THOUGHT: {thought}")
+        print(f"\n[{state['iteration']}] ROLE: {role.upper()} | THOUGHT: {thought}")
         print(f"ACTION: {action}({json.dumps(params)})")
 
-        # E. THE "ACT" PHASE: Execute Tools
+        # E. THE "ACT" PHASE
         result_output = ""
         success = False
         
         if action == "edit_file":
             path, content = params.get("path"), params.get("content")
             if path and content is not None:
-                # Syntax Gate (Felix recommendation)
                 if path.endswith(".py"):
-                    # Use temporary file to check syntax before overwriting
                     tmp_path = f"{path}.tmp"
                     if edit_file(tmp_path, content):
                         code, out = run_command(f"python3 -m py_compile {tmp_path}")
-                        os.remove(tmp_path)
+                        if os.path.exists(tmp_path): os.remove(tmp_path)
                         if code == 0:
                             success = edit_file(path, content)
-                            result_output = f"File {path} updated successfully."
+                            result_output = f"File {path} updated."
                         else:
                             success = False
-                            result_output = f"SYNTAX ERROR PREVENTED: Your proposed code for {path} was invalid:\n{out}"
+                            result_output = f"SYNTAX ERROR PREVENTED:\n{out}"
                 else:
                     success = edit_file(path, content)
                     result_output = f"File {path} written."
             else:
-                result_output = "ERROR: Missing path or content."
+                result_output = "ERROR: Missing path/content."
 
         elif action == "run_command":
             cmd = params.get("command")
             if cmd:
                 code, out = run_command(cmd)
                 success = (code == 0)
-                result_output = out[:1000] # Token efficiency (Luis recommendation)
-                
-                # Update failure clustering
-                if not success:
-                    state["failure_types"].append(classify_failure(out))
-                
-                # Auto-Snapshot
-                if success and ("test" in cmd or "git" in cmd):
-                    git_snapshot(f"Success in {state['iteration']}: {cmd}")
+                result_output = out[:800]
+                if not success: state["failure_types"] = state.get("failure_types", []) + [classify_failure(out)]
+                if success and ("test" in cmd or "git" in cmd): git_snapshot(f"Success: {cmd}")
             else:
                 result_output = "ERROR: Missing command."
 
@@ -191,13 +214,13 @@ def main():
             dir_path = params.get("dir", ".")
             files = list_files(dir_path)
             success = True
-            result_output = f"Files in {dir_path}: {str(files)}"
+            result_output = str(files)
 
         elif action == "stop":
-            log_event("decisions.log", f"Agent stopped: {params.get('reason')}")
+            log_event("decisions.log", f"Agent stopped explicitly: {params.get('reason')}")
             break
 
-        # F. Update Summary & Reasoning Memory
+        # F. Update Summary
         state["project_summary"]["last_action"] = action
         state["project_summary"]["last_result"] = "SUCCESS" if success else "FAILURE"
         
@@ -205,22 +228,24 @@ def main():
             state["project_summary"]["last_failure"] = result_output[:500]
             state["memory"].append(f"FAILED {action}: {result_output[:100]}")
             state["consecutive_success_count"] = 0
-            print(f"RESULT: ❌ FAILURE\n{result_output[:300]}...")
+            print(f"RESULT: ❌ FAILURE ({result_output[:100]}...)")
         else:
             state["project_summary"]["last_failure"] = None
-            state["memory"].append(f"SUCCESS {action}: {state['project_summary']['hypothesis']}")
+            state["memory"].append(f"SUCCESS {action}: {state['project_summary']['hypothesis'][:100]}")
             state["consecutive_success_count"] += 1
-            print(f"RESULT: ✅ SUCCESS\n{result_output[:300]}...")
+            print(f"RESULT: ✅ SUCCESS")
 
-        # G. Autonomous Stopping Rule
-        if state["consecutive_success_count"] >= 3:
-             # Stop if stable and a terminal command (like git or test) was successful
-             if any(x in str(state["memory"][-5:]) for x in ["SUCCESS run_command: git", "SUCCESS run_command: pytest"]):
-                 log_event("decisions.log", "System stabilized after successful terminal actions. Stopping.")
-                 break
+        # G. Intelligent Stop
+        if state["consecutive_success_count"] >= 3 and role == "reviewer":
+             log_event("decisions.log", "Reviewer satisfied. Stopping.")
+             break
 
         state["iteration"] += 1
         time.sleep(LOOP_DELAY)
+
+    # FINAL CLEANUP HOOK (Non-persistent rule)
+    print("\nRUNNING FINAL CLEANUP HOOK...")
+    run_command("find . -name '*.bak' -type f -delete")
 
     log_event("decisions.log", "42-X-Needle-Agent finished.")
 
