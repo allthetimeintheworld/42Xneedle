@@ -2,6 +2,4 @@ agent_logs/
 __pycache__/
 *.pyc
 .env
-secret_spec/
 .venv/
-GEMINI.md

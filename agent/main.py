@@ -60,6 +60,7 @@ def main():
         "memory": [],
         "last_tool_output": None,
         "completed_milestones": [],
+        "implementation_started": False,
         "project_summary": {"goal": "Uninitialized", "progress": "Just started", "last_failure": None, "hypothesis": "Initial exploration", "next_step": "List files"},
         "action_history": [],
         "failure_types": [],
@@ -76,34 +77,31 @@ def main():
         current_spec_hash = hashlib.md5(spec.encode()).hexdigest()
         if state["spec_hash"] and state["spec_hash"] != current_spec_hash:
             state["memory"], state["completed_milestones"], state["iteration"], state["consecutive_success_count"] = ["Resetting state for new task."], [], 0, 0
+            state["implementation_started"] = False
         state["spec_hash"] = current_spec_hash
         state["project_summary"]["goal"] = spec[:500]
 
-        role = "researcher" if state["project_summary"]["last_failure"] else "reviewer" if state["consecutive_success_count"] >= 2 else "architect"
+        # 2. ROLE ROUTING (Refined)
+        if state["project_summary"]["last_failure"]:
+            role = "researcher"
+        elif state["implementation_started"] and state["consecutive_success_count"] >= 4:
+            role = "reviewer"
+        else:
+            role = "architect"
         system_inst = prompts[role]
         
-        # Oscillation Detection (Strict)
         oscillation_warning = ""
         if len(state["action_history"]) >= 3 and len(set(state["action_history"][-3:])) == 1:
-            oscillation_warning = f"\n\nCRITICAL STALL WARNING: You have repeated the exact same action 3 times. You are likely trying to read a file that is truncated or repeating a failed hypothesis. CHANGE STRATEGY or use line ranges for reads."
+            oscillation_warning = f"\n\nCRITICAL STALL WARNING: You have repeated the exact same action 3 times. CHANGE STRATEGY or use line ranges for reads."
 
         workspace_files = []
         try:
             raw_files = os.listdir(".")
             workspace_files = [f for f in raw_files if f not in INFRASTRUCTURE_FILES]
-        except:
-            workspace_files = []
+        except: workspace_files = []
             
-        context = {
-            "current_role": role, 
-            "project_root": project_root, 
-            "summary": state["project_summary"], 
-            "last_tool_output": state["last_tool_output"], 
-            "completed_milestones": state["completed_milestones"], 
-            "insights": state["memory"][-5:], 
-            "workspace_files": workspace_files[:20]
-        }
-        prompt = f"SPECIFICATION:\n{spec[:1000]}\n\nCONTEXT:\n{json.dumps(context, indent=2)}{oscillation_warning}\n\nDECIDE NEXT ACTION:"
+        context = {"current_role": role, "project_root": project_root, "summary": state["project_summary"], "last_tool_output": state["last_tool_output"], "completed_milestones": state["completed_milestones"], "insights": state["memory"][-5:], "workspace_files": workspace_files[:20]}
+        prompt = f"SPECIFICATION (TRUNCATED):\n{spec[:4000]}\n\nCONTEXT:\n{json.dumps(context, indent=2)}{oscillation_warning}\n\nDECIDE NEXT ACTION:"
 
         decision = None
         for retry in range(2):
@@ -117,15 +115,9 @@ def main():
             continue
 
         action, params, thought = decision.get("action"), decision.get("params", {}), decision.get("thought", "No thought")
-        
-        # Action signature with params to detect loops
         params_hash = hashlib.md5(json.dumps(params, sort_keys=True).encode()).hexdigest()
         action_sig = f"{action}:{params_hash}"
-        
-        # RESET success count if repeating the same action
-        if len(state["action_history"]) > 0 and action_sig == state["action_history"][-1]:
-            state["consecutive_success_count"] = 0
-            
+        if len(state["action_history"]) > 0 and action_sig == state["action_history"][-1]: state["consecutive_success_count"] = 0
         state["action_history"].append(action_sig)
         
         if "milestone_reached" in decision:
@@ -138,6 +130,7 @@ def main():
 
         result_output, success = "", False
         if action == "edit_file":
+            state["implementation_started"] = True
             path, content = params.get("path"), params.get("content")
             if path and content is not None:
                 if path.endswith(".py"):
@@ -147,12 +140,11 @@ def main():
                         if os.path.exists(tmp_path): os.remove(tmp_path)
                         if code == 0:
                             success, result_output = edit_file(path, content), f"File {path} updated."
-                        else:
-                            success, result_output = False, f"SYNTAX ERROR PREVENTED:\n{out}"
-                else:
-                    success, result_output = edit_file(path, content), f"File {path} written."
+                        else: success, result_output = False, f"SYNTAX ERROR PREVENTED:\n{out}"
+                else: success, result_output = edit_file(path, content), f"File {path} written."
             else: result_output = "ERROR: Missing path/content."
         elif action == "run_command":
+            state["implementation_started"] = True
             cmd = params.get("command")
             if cmd:
                 code, out = run_command(cmd)
@@ -176,8 +168,7 @@ def main():
                     if os.path.isfile(fpath): files_with_info.append(f"{f} ({os.path.getsize(fpath)} bytes)")
                     else: files_with_info.append(f"{f} [DIR]")
                 except: files_with_info.append(f)
-            result_output = str(files_with_info)
-            state["last_tool_output"] = result_output
+            result_output, state["last_tool_output"] = str(files_with_info), str(files_with_info)
         elif action == "stop":
             log_event("decisions.log", f"Agent stopped: {params.get('reason')}")
             break

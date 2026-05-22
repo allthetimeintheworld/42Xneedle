@@ -20,14 +20,14 @@ load_env()
 # Configuration
 LOG_DIR = "agent_logs"
 SPEC_PATH = "secret_spec/SECRET_SPEC.md"
-MAX_ITERATIONS = 40 
+MAX_ITERATIONS = 100 
 LOOP_DELAY = int(os.environ.get("LOOP_DELAY", 2))
 
 # Infrastructure exclusion list (to prevent model distraction)
 INFRASTRUCTURE_FILES = [
     "agent", "orchestrator", "agent_logs", "README.md", 
     "ARCHITECTURAL_OVERVIEW.md", "GEMINI.md", ".env", ".venv", 
-    ".git", "__pycache__", "secret_spec", "modular_refactor.md"
+    ".git", "__pycache__", "modular_refactor.md", "task_spec.md"
 ]
 
 

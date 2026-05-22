@@ -8,25 +8,24 @@ The tool reads knitting pattern files written in a small domain-specific languag
 
 This is a compiler/interpreter-style problem. The domain is knitting because the sponsor is called Needle, and apparently we are all committed to the bit. The technical task is still serious: parsing, validation, simulation, error recovery, and deterministic output.
 
-## 2. Required CLI
+## 7. Testing
 
-Your tool must support exactly this command shape:
+You MUST run the provided test suite to verify your implementation.
 
+Command:
 ```bash
-python knit.py compile <input_file>
+python3 tests-info/secret_spec/test_runner/run_tests.py --compiler "python3 src/knit.py"
 ```
 
-Example:
+### Current Status (URGENT FIX REQUIRED)
+The current implementation at `src/knit.py` is failing 150/150 tests.
 
-```bash
-python knit.py compile examples/scarf.knit
-```
+Major Issues:
+- Key mismatches in JSON output.
+- Missing required fields: `bind_off`, `cast_on`, `errors`, `expanded_rows`, `final_stitch_count`, `pattern_name`, `valid`.
+- Incorrect DSL parsing logic.
 
-The `compile` command must print exactly one JSON document to stdout.
-
-It must not print logs, debug output, explanations, success messages, stack traces, or any other non-JSON text to stdout.
-
-All diagnostic or debug output, if any, must go to stderr. For judging, stdout is the contract.
+You MUST refactor `src/knit.py` to strictly follow the DSL rules and JSON output schema defined in this specification.
 
 ## 3. Input Files
 
