@@ -1,4 +1,5 @@
 import os
+import time
 from ..llm import log_event
 
 def _enforce_sandbox(path):
@@ -16,13 +17,26 @@ def _enforce_sandbox(path):
         log_event("errors.log", f"Path resolution error for {path}: {str(e)}")
         return None
 
-def read_file(path):
+def read_file(path, max_size=1024*1024): # 1MB limit
     safe_path = _enforce_sandbox(path)
     if safe_path and os.path.exists(safe_path):
-        with open(safe_path, "r") as f:
-            content = f.read()
-        log_event("commands.log", f"Read file: {path}")
-        return content
+        try:
+            # Check size before reading
+            if os.path.getsize(safe_path) > max_size:
+                msg = f"WARNING: File {path} is too large (>1MB). Truncating output."
+                log_event("errors.log", msg)
+                with open(safe_path, "r") as f:
+                    content = f.read(max_size)
+                return f"{msg}\n\n{content}"
+                
+            with open(safe_path, "r") as f:
+                content = f.read()
+            log_event("commands.log", f"Read file: {path}")
+            return content
+        except Exception as e:
+            log_event("errors.log", f"read_file failed for {path}: {str(e)}")
+            return None
+            
     log_event("errors.log", f"read_file failed: path invalid or not found: {path}")
     return None
 
@@ -34,12 +48,13 @@ def edit_file(path, content):
     try:
         os.makedirs(os.path.dirname(safe_path), exist_ok=True)
         
-        # Simple backup before overwrite
+        # Versioned backup before overwrite
         if os.path.exists(safe_path):
-            backup_path = f"{safe_path}.bak"
+            timestamp = int(time.time())
+            backup_path = f"{safe_path}.{timestamp}.bak"
             with open(safe_path, "r") as f_src, open(backup_path, "w") as f_dst:
                 f_dst.write(f_src.read())
-            log_event("commands.log", f"Created backup: {backup_path}")
+            log_event("commands.log", f"Created versioned backup: {backup_path}")
 
         with open(safe_path, "w") as f:
             f.write(content)

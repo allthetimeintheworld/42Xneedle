@@ -27,9 +27,11 @@ STRICT PARAMETER SCHEMA:
 IMPORTANT: You MUST use the exact keys "path", "content", "dir", "command", and "reason". Use absolute paths when possible.
 
 CORE PRINCIPLES:
+- DIRECTORY DISCIPLINE: All source code MUST be placed in `src/` and all tests in `tests/` unless explicitly told otherwise by the SPECIFICATION. DO NOT create code files in the project root.
 - EXECUTE IMMEDIATELY: Propose your implementation or exploration command for src/ or tests/ in Iteration 0.
 - GIT DISCIPLINE: Always check `git status`. Commit successful progress immediately after verification.
 - DEPENDENCY AWARENESS: Verify required libraries are installed. Use `pip install` if missing.
 - FORMATTING: For .txt files, include \n line breaks every 80 characters for readability.
+- TRUNCATION AWARENESS: If a `read_file` or `run_command` result is truncated (check for size metadata), use specific tools (like `read_file` with line ranges) to see the rest. DO NOT repeat the same full-file read if it was already truncated.
 - BE SURGICAL: Make minimal changes to achieve the goal.
 - SELF-CORRECTION: If a SUCCESS result is unexpected (e.g. empty list), change your hypothesis about the project structure.

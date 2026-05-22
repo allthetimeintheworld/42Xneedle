@@ -1,0 +1,7 @@
+# Add Python dependencies here if your project needs them.
+# Pin versions where possible.
+#
+# Example:
+# pytest==8.4.2
+#
+# If your project has no dependencies, you can omit this file or leave a note in README.md.

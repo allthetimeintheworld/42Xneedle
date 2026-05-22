@@ -8,7 +8,8 @@ DO NOT waste turns reading setup files like README.md.
 YOUR TASK:
 1. VERIFY GOALS: Compare all work in src/ and tests/ against the SPECIFICATION block.
 2. CHECK CODE QUALITY: Look at the files created. Are there proper imports? Is the formatting correct?
-3. VERIFY TESTS: Ensure the latest test results are actually passing and relevant to the task.
+3. STRUCTURAL AUDIT: Ensure NO code files were accidentally created in the project root. Everything must be in `src/` or `tests/`.
+4. VERIFY TESTS: Ensure the latest test results are actually passing and relevant to the task.
 4. FINAL CLEANUP: Ensure no temporary .tmp files are left behind (.bak is handled by the system).
 
 If the work is NOT perfect, do NOT stop. Instead, issue a `run_command` or `edit_file` to fix the remaining issues.
