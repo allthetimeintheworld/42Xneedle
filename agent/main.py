@@ -2,7 +2,7 @@ import os
 import time
 import json
 import hashlib
-from .config import MAX_ITERATIONS, SPEC_PATH, LOOP_DELAY
+from .config import MAX_ITERATIONS, SPEC_PATH, LOOP_DELAY, INFRASTRUCTURE_FILES
 from .config import GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY
 from .llm import ask_model, log_event
 from .tools.filesystem import read_file, edit_file, list_files
@@ -34,14 +34,7 @@ def classify_failure(output):
     return "RUNTIME"
 
 def print_banner():
-    colors = [
-        "\033[91m", # Red
-        "\033[93m", # Yellow
-        "\033[92m", # Green
-        "\033[96m", # Cyan
-        "\033[94m", # Blue
-        "\033[95m"  # Magenta
-    ]
+    colors = ["\033[91m", "\033[93m", "\033[92m", "\033[96m", "\033[94m", "\033[95m"]
     reset = "\033[0m"
     banner = r"""
   _____ __  __          _____ 
@@ -52,147 +45,92 @@ def print_banner():
                                
     42-X-Needle Autonomous Agent
     """
-    lines = banner.split("\n")
-    for i, line in enumerate(lines):
-        color = colors[i % len(colors)]
-        print(f"{color}{line}{reset}")
+    for i, line in enumerate(banner.split("\n")):
+        print(f"{colors[i % len(colors)]}{line}{reset}")
 
 def main():
-    # 0. Startup Validation (James's SecOps recommendation)
     if not any([GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY]):
-        print("\nFATAL ERROR: No API keys found for Groq, Mistral, or DeepSeek.")
-        print("Please check your .env file and ensure credentials are correct.")
+        print("\nFATAL ERROR: No API keys found.")
         return
 
-    # 1. Goal-Stable State Initialization
     project_root = os.getcwd()
     print_banner()
     state = {
         "iteration": 0,
-        "memory": [],  # Strategic insights
-        "last_tool_output": None, # PERCEPTION FIX
-        "completed_milestones": [], # EXPLICIT DONE LIST
-        "project_summary": {
-            "goal": "Uninitialized",
-            "progress": "Just started",
-            "last_failure": None,
-            "hypothesis": "Initial exploration",
-            "next_step": "List files"
-        },
-        "action_history": [], # Track (action, params_hash) to detect loops
+        "memory": [],
+        "last_tool_output": None,
+        "completed_milestones": [],
+        "implementation_started": False,
+        "project_summary": {"goal": "Uninitialized", "progress": "Just started", "last_failure": None, "hypothesis": "Initial exploration", "next_step": "List files"},
+        "action_history": [],
         "failure_types": [],
         "consecutive_failure_count": 0,
         "spec_hash": "",
         "consecutive_success_count": 0
     }
 
-    # Load Role-Based Prompts
-    prompts = {
-        "architect": load_prompt("architect"),
-        "researcher": load_prompt("researcher"),
-        "reviewer": load_prompt("reviewer")
-    }
-
-    log_event("decisions.log", "42-X-Needle-Agent started.")
+    prompts = {"architect": load_prompt("architect"), "researcher": load_prompt("researcher"), "reviewer": load_prompt("reviewer")}
 
     while state["iteration"] < MAX_ITERATIONS:
         log_event("decisions.log", f"Starting iteration {state['iteration']}")
-        
-        # A. Read Specification
         spec = read_file(SPEC_PATH) or "No specification found."
         current_spec_hash = hashlib.md5(spec.encode()).hexdigest()
         if state["spec_hash"] and state["spec_hash"] != current_spec_hash:
-            log_event("decisions.log", "Spec change detected! Resetting for new objective.")
-            state["memory"] = ["Resetting state for new task specification."]
-            state["completed_milestones"] = []
-            state["iteration"] = 0
-            state["consecutive_success_count"] = 0
+            state["memory"], state["completed_milestones"], state["iteration"], state["consecutive_success_count"] = ["Resetting state for new task."], [], 0, 0
+            state["implementation_started"] = False
         state["spec_hash"] = current_spec_hash
         state["project_summary"]["goal"] = spec[:500]
 
-        # B. ROLE ROUTING
-        is_failing = state["project_summary"]["last_failure"] is not None
-        
-        if is_failing:
+        # 2. ROLE ROUTING (Refined)
+        if state["project_summary"]["last_failure"]:
             role = "researcher"
-        elif state["consecutive_success_count"] >= 2:
+        elif state["implementation_started"] and state["consecutive_success_count"] >= 4:
             role = "reviewer"
         else:
             role = "architect"
-            
         system_inst = prompts[role]
         
-        # Oscillation Detection
         oscillation_warning = ""
-        last_actions = state["action_history"][-3:]
-        if len(last_actions) >= 3 and len(set(last_actions)) == 1:
-            oscillation_warning = f"\n\nSTALL WARNING: You have repeated the same action 3 times. CHANGE STRATEGY."
+        if len(state["action_history"]) >= 3 and len(set(state["action_history"][-3:])) == 1:
+            oscillation_warning = f"\n\nCRITICAL STALL WARNING: You have repeated the exact same action 3 times. CHANGE STRATEGY or use line ranges for reads."
 
-        # Inject state summary and project context
-        all_files = list_files(".")
-        # Filter out agent infrastructure to prevent distraction
-        workspace_files = [f for f in all_files if f not in [
-            "agent", "orchestrator", "agent_logs", "README.md", 
-            "ARCHITECTURAL_OVERVIEW.md", "GEMINI.md", ".env", ".venv", 
-            ".git", "__pycache__", "secret_spec"
-        ]]
+        workspace_files = []
+        try:
+            raw_files = os.listdir(".")
+            workspace_files = [f for f in raw_files if f not in INFRASTRUCTURE_FILES]
+        except: workspace_files = []
+            
+        context = {"current_role": role, "project_root": project_root, "summary": state["project_summary"], "last_tool_output": state["last_tool_output"], "completed_milestones": state["completed_milestones"], "insights": state["memory"][-5:], "workspace_files": workspace_files[:20]}
+        prompt = f"SPECIFICATION (TRUNCATED):\n{spec[:4000]}\n\nCONTEXT:\n{json.dumps(context, indent=2)}{oscillation_warning}\n\nDECIDE NEXT ACTION:"
 
-        context = {
-            "current_role": role,
-            "project_root": project_root,
-            "summary": state["project_summary"],
-            "last_tool_output": state["last_tool_output"], # PERCEPTION FIX
-            "completed_milestones": state["completed_milestones"],
-            "insights": state["memory"][-5:],
-            "workspace_files": workspace_files[:20]
-        }
-        
-        prompt = f"SPECIFICATION:\n{spec[:1000]}\n\nCONTEXT:\n{json.dumps(context, indent=2)}{oscillation_warning}\n\nDECIDE NEXT ACTION:"
-
-        # C. LLM Call
         decision = None
         for retry in range(2):
             response_str = ask_model(prompt, system_inst)
             decision, error = parse_action(response_str)
-            if not error:
-                action = decision.get("action")
-                if action in VALID_ACTIONS:
-                    break
-                else:
-                    error = f"Invalid action '{action}'. Must be one of {VALID_ACTIONS}"
-            
-            log_event("errors.log", f"Refining response (Retry {retry}): {error}")
-            prompt += f"\n\nERROR: {error}. Return valid JSON with a supported 'action'."
+            if not error and decision.get("action") in VALID_ACTIONS: break
+            prompt += f"\n\nERROR: {error}. Return valid JSON."
 
         if not decision:
             state["iteration"] += 1
             continue
 
-        # D. Update State Tracking
-        action = decision.get("action")
-        params = decision.get("params", {})
-        thought = decision.get("thought", "No thought provided")
+        action, params, thought = decision.get("action"), decision.get("params", {}), decision.get("thought", "No thought")
+        params_hash = hashlib.md5(json.dumps(params, sort_keys=True).encode()).hexdigest()
+        action_sig = f"{action}:{params_hash}"
+        if len(state["action_history"]) > 0 and action_sig == state["action_history"][-1]: state["consecutive_success_count"] = 0
+        state["action_history"].append(action_sig)
         
         if "milestone_reached" in decision:
             m = decision["milestone_reached"]
-            if m not in state["completed_milestones"]:
-                state["completed_milestones"].append(m)
+            if m not in state["completed_milestones"]: state["completed_milestones"].append(m)
 
-        params_hash = hashlib.md5(json.dumps(params, sort_keys=True).encode()).hexdigest()
-        state["action_history"].append(f"{action}:{params_hash}")
-        
         state["project_summary"]["hypothesis"] = decision.get("hypothesis", state["project_summary"]["hypothesis"])
         state["project_summary"]["next_step"] = decision.get("task_status", "Proceeding...")
+        print(f"\n[{state['iteration']}] ROLE: {role.upper()} | THOUGHT: {thought}\nACTION: {action}({json.dumps(params)})")
 
-        log_event("decisions.log", f"Role: {role} | Action: {action} | Thought: {thought}")
-        print(f"\n[{state['iteration']}] ROLE: {role.upper()} | THOUGHT: {thought}")
-        print(f"ACTION: {action}({json.dumps(params)})")
-
-        # E. THE "ACT" PHASE
-        result_output = ""
-        success = False
-        
+        result_output, success = "", False
         if action == "edit_file":
+            state["implementation_started"] = True
             path, content = params.get("path"), params.get("content")
             if path and content is not None:
                 if path.endswith(".py"):
@@ -201,75 +139,58 @@ def main():
                         code, out = run_command(f"python3 -m py_compile {tmp_path}")
                         if os.path.exists(tmp_path): os.remove(tmp_path)
                         if code == 0:
-                            success = edit_file(path, content)
-                            result_output = f"File {path} updated."
-                        else:
-                            success = False
-                            result_output = f"SYNTAX ERROR PREVENTED:\n{out}"
-                else:
-                    success = edit_file(path, content)
-                    result_output = f"File {path} written."
-            else:
-                result_output = "ERROR: Missing path/content."
-
+                            success, result_output = edit_file(path, content), f"File {path} updated."
+                        else: success, result_output = False, f"SYNTAX ERROR PREVENTED:\n{out}"
+                else: success, result_output = edit_file(path, content), f"File {path} written."
+            else: result_output = "ERROR: Missing path/content."
         elif action == "run_command":
+            state["implementation_started"] = True
             cmd = params.get("command")
             if cmd:
                 code, out = run_command(cmd)
-                success = (code == 0)
-                result_output = out[:800]
+                success, result_output = (code == 0), out[:800]
                 if not success: state["failure_types"].append(classify_failure(out))
                 if success and ("test" in cmd or "git" in cmd): git_snapshot(f"Success: {cmd}")
-            else:
-                result_output = "ERROR: Missing command."
-
+            else: result_output = "ERROR: Missing command."
         elif action == "read_file":
             path = params.get("path")
             content = read_file(path) if path else None
-            success = (content is not None)
-            result_output = content[:1000] if success else "File not found."
-            state["last_tool_output"] = result_output # PERCEPTION FIX
-
+            success, result_output = (content is not None), (content[:1000] if content else "File not found.")
+            state["last_tool_output"] = result_output
         elif action == "list_files":
             dir_path = params.get("dir", ".")
             files = list_files(dir_path)
             success = True
-            result_output = str(files)
-            state["last_tool_output"] = result_output # PERCEPTION FIX
-
+            files_with_info = []
+            for f in files:
+                try:
+                    fpath = os.path.join(dir_path, f)
+                    if os.path.isfile(fpath): files_with_info.append(f"{f} ({os.path.getsize(fpath)} bytes)")
+                    else: files_with_info.append(f"{f} [DIR]")
+                except: files_with_info.append(f)
+            result_output, state["last_tool_output"] = str(files_with_info), str(files_with_info)
         elif action == "stop":
-            log_event("decisions.log", f"Agent stopped explicitly: {params.get('reason')}")
+            log_event("decisions.log", f"Agent stopped: {params.get('reason')}")
             break
 
-        # F. Update Summary
-        state["project_summary"]["last_action"] = action
-        state["project_summary"]["last_result"] = "SUCCESS" if success else "FAILURE"
-        
+        state["project_summary"]["last_action"], state["project_summary"]["last_result"] = action, "SUCCESS" if success else "FAILURE"
         if not success:
             state["project_summary"]["last_failure"] = result_output[:500]
             state["memory"].append(f"FAILED {action}: {result_output[:100]}")
-            state["consecutive_success_count"] = 0
-            state["consecutive_failure_count"] += 1
+            state["consecutive_success_count"], state["consecutive_failure_count"] = 0, state["consecutive_failure_count"] + 1
             print(f"RESULT: ❌ FAILURE ({result_output[:100]}...)")
-            
-            if state["consecutive_failure_count"] >= 5:
-                print("\nCRITICAL: 5 consecutive failures detected. Terminating.")
-                break
+            if state["consecutive_failure_count"] >= 5: break
         else:
             state["project_summary"]["last_failure"] = None
             state["memory"].append(f"SUCCESS {action}: {state['project_summary']['hypothesis'][:100]}")
-            state["consecutive_success_count"] += 1
-            state["consecutive_failure_count"] = 0
+            state["consecutive_success_count"], state["consecutive_failure_count"] = state["consecutive_success_count"] + 1, 0
             print(f"RESULT: ✅ SUCCESS")
 
         state["iteration"] += 1
         time.sleep(LOOP_DELAY)
 
-    # FINAL CLEANUP HOOK (Non-persistent rule)
     print("\nRUNNING FINAL CLEANUP HOOK...")
     run_command("find . -name '*.bak' -type f -delete")
-
     log_event("decisions.log", "42-X-Needle-Agent finished.")
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

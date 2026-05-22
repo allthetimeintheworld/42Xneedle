@@ -1,4 +1,5 @@
 import subprocess
+import os
 from ..llm import log_event
 
 def run_command(command, timeout=120):
@@ -28,5 +29,24 @@ def run_command(command, timeout=120):
         return -1, str(e)
 
 def git_snapshot(message):
+    # 1. Check if git is initialized
+    if not os.path.exists(".git"):
+        log_event("errors.log", "git_snapshot failed: .git directory not found. Skipping snapshot.")
+        return False
+
+    # 2. Check if there are changes to commit
+    status_code, status_out = run_command("git status --porcelain")
+    if status_code == 0 and not status_out.strip():
+        # No changes, skip commit to avoid noise
+        return True
+
+    # 3. Perform snapshot
     run_command("git add .")
-    run_command(f'git commit -m "agent: {message}"')
+    # Wrap message in single quotes to handle special characters
+    code, out = run_command(f"git commit -m 'agent: {message}'")
+    
+    if code != 0 and "nothing to commit" not in out:
+        log_event("errors.log", f"git_snapshot failed: {out}")
+        return False
+        
+    return True
