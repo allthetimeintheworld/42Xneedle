@@ -21,7 +21,7 @@ You MUST return a JSON object with:
 
 STRICT PARAMETER SCHEMA:
 - edit_file: {"path": "string", "content": "string"}
-- read_file: {"path": "string"}
+- read_file: {"path": "string", "start_line": int, "end_line": int}
 - list_files: {"dir": "string"}
 - run_command: {"command": "string"}
 - stop: {"reason": "string"}

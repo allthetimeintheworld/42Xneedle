@@ -59,6 +59,7 @@ def main():
         "iteration": 0,
         "memory": [],
         "last_tool_output": None,
+        "file_cache": {}, # NEW: Emergency perception cache
         "completed_milestones": [],
         "implementation_started": False,
         "project_summary": {"goal": "Uninitialized", "progress": "Just started", "last_failure": None, "hypothesis": "Initial exploration", "next_step": "List files"},
@@ -78,10 +79,11 @@ def main():
         if state["spec_hash"] and state["spec_hash"] != current_spec_hash:
             state["memory"], state["completed_milestones"], state["iteration"], state["consecutive_success_count"] = ["Resetting state for new task."], [], 0, 0
             state["implementation_started"] = False
+            state["file_cache"] = {}
         state["spec_hash"] = current_spec_hash
         state["project_summary"]["goal"] = spec[:500]
 
-        # 2. ROLE ROUTING (Refined)
+        # 2. ROLE ROUTING (Emergency Gating)
         if state["project_summary"]["last_failure"]:
             role = "researcher"
         elif state["implementation_started"] and state["consecutive_success_count"] >= 4:
@@ -90,9 +92,14 @@ def main():
             role = "architect"
         system_inst = prompts[role]
         
+        # Oscillation Detection (Strict)
         oscillation_warning = ""
         if len(state["action_history"]) >= 3 and len(set(state["action_history"][-3:])) == 1:
             oscillation_warning = f"\n\nCRITICAL STALL WARNING: You have repeated the exact same action 3 times. CHANGE STRATEGY or use line ranges for reads."
+
+        # Forced Implementation Circuit Breaker (Iteration 5)
+        if state["iteration"] >= 5 and not state["implementation_started"]:
+            oscillation_warning += "\n\nURGENT: You have been exploring for 5 iterations. You MUST begin implementation in src/ now, even if you do not have the full specification. Partial progress is better than a read loop."
 
         workspace_files = []
         try:
@@ -100,7 +107,16 @@ def main():
             workspace_files = [f for f in raw_files if f not in INFRASTRUCTURE_FILES]
         except: workspace_files = []
             
-        context = {"current_role": role, "project_root": project_root, "summary": state["project_summary"], "last_tool_output": state["last_tool_output"], "completed_milestones": state["completed_milestones"], "insights": state["memory"][-5:], "workspace_files": workspace_files[:20]}
+        context = {
+            "current_role": role, 
+            "project_root": project_root, 
+            "summary": state["project_summary"], 
+            "last_tool_output": state["last_tool_output"], 
+            "file_cache": state["file_cache"], # Inject persistent file chunks
+            "completed_milestones": state["completed_milestones"], 
+            "insights": state["memory"][-5:], 
+            "workspace_files": workspace_files[:20]
+        }
         prompt = f"SPECIFICATION (TRUNCATED):\n{spec[:4000]}\n\nCONTEXT:\n{json.dumps(context, indent=2)}{oscillation_warning}\n\nDECIDE NEXT ACTION:"
 
         decision = None
@@ -154,9 +170,22 @@ def main():
             else: result_output = "ERROR: Missing command."
         elif action == "read_file":
             path = params.get("path")
-            content = read_file(path) if path else None
-            success, result_output = (content is not None), (content[:1000] if content else "File not found.")
+            s_line = params.get("start_line")
+            e_line = params.get("end_line")
+            content = read_file(path, start_line=s_line, end_line=e_line) if path else None
+            success = (content is not None)
+            result_output = (content[:5000] if content else "File not found.")
             state["last_tool_output"] = result_output
+            
+            # Update cache if reading a file ( Felix's Suggestion )
+            if success and path:
+                if path not in state["file_cache"]: state["file_cache"][path] = []
+                # Keep last 2 unique chunks to prevent overflow but maintain context
+                chunk_summary = f"Lines {s_line or 1}-{e_line or 'end'}: {content[:100]}..."
+                if chunk_summary not in state["file_cache"][path]:
+                    state["file_cache"][path].append(chunk_summary)
+                    if len(state["file_cache"][path]) > 3: state["file_cache"][path].pop(0)
+
         elif action == "list_files":
             dir_path = params.get("dir", ".")
             files = list_files(dir_path)

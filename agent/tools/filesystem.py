@@ -17,22 +17,33 @@ def _enforce_sandbox(path):
         log_event("errors.log", f"Path resolution error for {path}: {str(e)}")
         return None
 
-def read_file(path, max_size=1024*1024): # 1MB limit
+def read_file(path, start_line=None, end_line=None, max_size=1024*1024): # 1MB limit
     safe_path = _enforce_sandbox(path)
     if safe_path and os.path.exists(safe_path):
         try:
             # Check size before reading
-            if os.path.getsize(safe_path) > max_size:
-                msg = f"WARNING: File {path} is too large (>1MB). Truncating output."
-                log_event("errors.log", msg)
-                with open(safe_path, "r") as f:
-                    content = f.read(max_size)
-                return f"{msg}\n\n{content}"
-                
+            file_size = os.path.getsize(safe_path)
+            
             with open(safe_path, "r") as f:
+                if start_line is not None or end_line is not None:
+                    # Surgical read
+                    lines = f.readlines()
+                    start = max(0, (start_line or 1) - 1)
+                    end = end_line or len(lines)
+                    content = "".join(lines[start:end])
+                    msg = f"Read lines {start+1}-{end} of {len(lines)} from {path}."
+                    log_event("commands.log", msg)
+                    return content
+                
+                if file_size > max_size:
+                    msg = f"WARNING: File {path} is too large ({file_size} bytes). Truncating output to 1MB."
+                    log_event("errors.log", msg)
+                    content = f.read(max_size)
+                    return f"{msg}\n\n{content}"
+                
                 content = f.read()
-            log_event("commands.log", f"Read file: {path}")
-            return content
+                log_event("commands.log", f"Read file: {path} ({file_size} bytes)")
+                return content
         except Exception as e:
             log_event("errors.log", f"read_file failed for {path}: {str(e)}")
             return None
